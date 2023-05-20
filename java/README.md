@@ -1,6 +1,6 @@
 # Building the Java and Android Meterpreter
 
-1. Install Maven and Java, this will depend on your OS
+1. Install Maven and Java 1.8, this will depend on your OS
 1. Download the [Android SDK](https://developer.android.com/sdk/index.html)
 1. Install Android SDK Platforms 3, 10 and 19, and update the "Android SDK Tools" and "Android SDK Platform-tools"
 1. Compile the Android and Java Meterpreter, which deploys to the `../metasploit-framework` folder
@@ -42,9 +42,11 @@ make android
 ```
 
 ## Building on OSX
+
 ```
-brew cask install caskroom/versions/java8
-brew cask install android-sdk
+brew tap homebrew/cask-versions
+brew install --cask temurin8
+brew install --cask android-sdk
 brew install maven
 sdkmanager --licenses
 sdkmanager "platforms;android-3"
@@ -52,6 +54,14 @@ sdkmanager "platforms;android-10"
 sdkmanager "platforms;android-19"
 
 #cd metasploit-payloads/java
+
+# Ensure Java 1.8 is used
+export JAVA_HOME=/Library/Java/JavaVirtualMachines/openjdk-8.jdk/Contents/Home
+
+# Just Meterpreter
+mvn package -P deploy
+
+# If you want android
 mvn package -Dandroid.sdk.path=/usr/local/share/android-sdk -Dandroid.release=true -P deploy
 ```
 
@@ -118,6 +128,14 @@ versions bundled with the metasploit-payloads Ruby gem.
 
 # IDE Support
 
+First ensure you have Java 1.8 and maven installed.
+
+## IntelliJ
+
+Go to `File -> Open` to the `metasploit-payloads/java` directory. TODO.
+
+## Eclipse 
+
 In case you want to edit/debug JavaPayload for Metasploit or Java Meterpreter
 with an IDE, Maven provides plugins to auto-generate project files for your
 favourite environment (at least for Eclipse, Netbeans or IntelliJ).
@@ -134,19 +152,10 @@ This will generate project files that can be imported via
 
 into your Eclipse workspace.
 
-(Note that if this is your first Maven project you want to use in Eclipse, you
-also have to run
+Note that if this is your first Maven project you want to use in Eclipse, you
+also have to run the following to set up path variables like `M2_REPO` to point
+to the correct location.
 
 ```
 mvn -Declipse.workspace=/path/to/your/workspace eclipse:configure-workspace
 ```
-
-to set up path variables like `M2_REPO` to point to the correct location.)
-
-For NetBeans or IntelliJ IDEA, refer to the documentation at
-
-http://maven.apache.org/netbeans-module.html
-http://maven.apache.org/plugins/maven-idea-plugin/
-
-
-

