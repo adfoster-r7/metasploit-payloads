@@ -63,10 +63,13 @@ Routing tables
 Internet:
 Destination        Gateway            Flags        Netif Expire
 default            10.79.0.1          UGScg          en0
+192.168.1          link#6             UCS            en0      !
 
 Internet6:
 Destination                             Gateway                         Flags         Netif Expire
 default                                 fe80::%utun0                    UGcIg         utun0
+fe80::aede:48ff:fe00:1122%en5           ac:de:48:0:11:22                UHLI            lo0
+fe80::1c6a:3377:d899:ae4c%bridge100     8a.66.5a.23.29.64               UHLI            lo0
 """.lstrip()
 
         process_mock = mock.Mock()
@@ -90,11 +93,32 @@ default                                 fe80::%utun0                    UGcIg   
                 "subnet": b"\x00\x00\x00\x00",
             },
             {
+                "gateway": b"\x00\x00\x00\x00",
+                "iface": "en0",
+                "metric": 0,
+                "netmask": b"\xff\xff\xff\xff",
+                "subnet": b"\xc0\xa8\x01\x00",
+            },
+            {
                 "gateway": b"\xfe\x80\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00",
                 "iface": "utun0",
                 "metric": 0,
                 "netmask": b"\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00",
                 "subnet": b"\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00",
+            },
+            {
+                "gateway": b"\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00",
+                "iface": "lo0",
+                "metric": 0,
+                "netmask": b"\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\x00\x00\x00\x00",
+                "subnet": b'\xfe\x80\x00\x00\x00\x00\x00\x00\xae\xdeH\xff\xfe\x00\x11"',
+            },
+            {
+                "gateway": b"\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00",
+                "iface": "lo0",
+                "metric": 0,
+                "netmask": b"\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\x00\x00\x00\x00",
+                "subnet": b"\xfe\x80\x00\x00\x00\x00\x00\x00\x1cj3w\xd8\x99\xaeL",
             },
         ]
 
