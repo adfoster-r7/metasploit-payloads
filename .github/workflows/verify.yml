@@ -33,3 +33,27 @@ jobs:
         run: |
           cd c/meterpreter
           script --return --command 'make docker'
+
+  python:
+    strategy:
+      fail-fast: true
+      matrix:
+        os:
+          - macos-latest
+          - windows-latest
+          - ubuntu-latest
+        runtime_version:
+          - 2.7
+          - 3.6
+          - 3.8
+
+    timeout-minutes: 40
+    name: Python ${{ matrix.meterpreter.runtime_version }} ${{ matrix.os }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: run tests
+        run: |
+          python -m unittest discover -v ./tests
