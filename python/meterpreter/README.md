@@ -18,4 +18,7 @@ python3 ./tests/test_file.py class_name.method_name
 
 # For example
 python3 ./tests/test_ext_server_stdapi.py TestExtServerStdApi.test_stdapi_net_config_get_interfaces_via_osx_ifconfig
+
+# Or:
+python3 -m unittest tests.test_ext_server_stdapi.ExtServerStdApiFileSystemTest.test_stdapi_fs_stat_with_negative_st_rdev
 ```
