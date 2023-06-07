@@ -273,5 +273,19 @@ class ExtServerStdApiFileSystemTest(ExtServerStdApiTest):
         self.assertMethodErrorSuccess("stdapi_fs_stat", request, response)
 
 
+class ExtServerStdApiSystemConfigTest(ExtServerStdApiTest):
+    def test_stdapi_fs_stat(self):
+        request = bytes()
+        response = bytes()
+        _result_code, result_tlvs = self.assertMethodErrorSuccess(
+            "stdapi_sys_config_getuid", request, response
+        )
+
+        user_name = self.meterpreter_context["packet_get_tlv"](
+            result_tlvs, self.ext_server_stdapi["TLV_TYPE_USER_NAME"]
+        ).get("value")
+        self.assertTrue(len(user_name))
+
+
 if __name__ == "__main__":
     unittest.main()
