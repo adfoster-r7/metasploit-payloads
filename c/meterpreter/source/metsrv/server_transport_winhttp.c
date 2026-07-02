@@ -663,10 +663,9 @@ static DWORD server_init_winhttp(Transport* transport)
 	dprintf("[DISPATCH] About to crack URL: %S", transport->url);
 	WinHttpCrackUrl(transport->url, 0, 0, &bits);
 
-	SAFE_FREE(ctx->default_options.uri);
-	ctx->default_options.uri = _wcsdup(tmpUrlPath);
+	http_options_set_single_uri(&ctx->default_options, tmpUrlPath);
 
-	dprintf("[DISPATCH] Configured URI: %S", ctx->default_options.uri);
+	dprintf("[DISPATCH] Configured URI: %S", tmpUrlPath);
 	dprintf("[DISPATCH] Host: %S Port: %u", tmpHostName, bits.nPort);
 
 	DWORD result = server_init_connection(ctx, &ctx->get_connection, tmpHostName, bits.nPort);
@@ -848,10 +847,12 @@ static DWORD server_dispatch_http(Remote* remote, THREAD* dispatchThread)
 static void destroy_options(HttpRequestOptions* options)
 {
 	SAFE_FREE(options->ua);
-	SAFE_FREE(options->uri);
+	http_options_free_uris(options);
 	SAFE_FREE(options->headers);
 	SAFE_FREE(options->payload_prefix);
 	SAFE_FREE(options->payload_suffix);
+	SAFE_FREE(options->uuid_prefix);
+	SAFE_FREE(options->uuid_suffix);
 	SAFE_FREE(options->uuid_cookie);
 	SAFE_FREE(options->uuid_header);
 	SAFE_FREE(options->uuid_get);
@@ -909,9 +910,25 @@ static void transport_destroy_http(Transport* transport)
  */
 BOOL set_http_options_to_tlv(Packet* optionsPacket, HttpRequestOptions* sourceOptions)
 {
-	if (sourceOptions->encode_flags != 0)
+	if (sourceOptions->encode_flags_inbound != 0)
 	{
-		packet_add_tlv_uint(optionsPacket, TLV_TYPE_C2_ENC, sourceOptions->encode_flags);
+		packet_add_tlv_uint(optionsPacket, TLV_TYPE_C2_ENC_INBOUND, sourceOptions->encode_flags_inbound);
+	}
+	if (sourceOptions->encode_flags_outbound != 0)
+	{
+		packet_add_tlv_uint(optionsPacket, TLV_TYPE_C2_ENC_OUTBOUND, sourceOptions->encode_flags_outbound);
+	}
+	if (sourceOptions->encode_flags_uuid != 0)
+	{
+		packet_add_tlv_uint(optionsPacket, TLV_TYPE_C2_ENC_UUID, sourceOptions->encode_flags_uuid);
+	}
+	if (sourceOptions->uuid_prefix != NULL)
+	{
+		packet_add_tlv_wstring(optionsPacket, TLV_TYPE_C2_UUID_PREFIX, sourceOptions->uuid_prefix);
+	}
+	if (sourceOptions->uuid_suffix != NULL)
+	{
+		packet_add_tlv_wstring(optionsPacket, TLV_TYPE_C2_UUID_SUFFIX, sourceOptions->uuid_suffix);
 	}
 	if (sourceOptions->headers != NULL)
 	{
@@ -937,9 +954,9 @@ BOOL set_http_options_to_tlv(Packet* optionsPacket, HttpRequestOptions* sourceOp
 	{
 		packet_add_tlv_wstring(optionsPacket, TLV_TYPE_C2_UA, sourceOptions->ua);
 	}
-	if (sourceOptions->uri != NULL)
+	for (UINT i = 0; i < sourceOptions->uri_count; ++i)
 	{
-		packet_add_tlv_wstring(optionsPacket, TLV_TYPE_C2_URI, sourceOptions->uri);
+		packet_add_tlv_wstring(optionsPacket, TLV_TYPE_C2_URI, sourceOptions->uris[i]);
 	}
 	if (sourceOptions->uuid_cookie != NULL)
 	{
@@ -1012,14 +1029,44 @@ void transport_write_http_config(Transport* transport, Packet* c2Packet)
  */
 BOOL get_http_options_from_tlv(Packet* packet, Tlv* optionsTlv, HttpRequestOptions* targetOptions)
 {
-	targetOptions->encode_flags = packet_get_tlv_group_entry_value_uint(packet, optionsTlv, TLV_TYPE_C2_ENC);
+	targetOptions->encode_flags_inbound = packet_get_tlv_group_entry_value_uint(packet, optionsTlv, TLV_TYPE_C2_ENC_INBOUND);
+	targetOptions->encode_flags_outbound = packet_get_tlv_group_entry_value_uint(packet, optionsTlv, TLV_TYPE_C2_ENC_OUTBOUND);
+	targetOptions->encode_flags_uuid = packet_get_tlv_group_entry_value_uint(packet, optionsTlv, TLV_TYPE_C2_ENC_UUID);
+	targetOptions->uuid_prefix = packet_get_tlv_group_entry_value_wstring(packet, optionsTlv, TLV_TYPE_C2_UUID_PREFIX, NULL);
+	targetOptions->uuid_suffix = packet_get_tlv_group_entry_value_wstring(packet, optionsTlv, TLV_TYPE_C2_UUID_SUFFIX, NULL);
 	targetOptions->headers = packet_get_tlv_group_entry_value_wstring(packet, optionsTlv, TLV_TYPE_C2_HEADERS, NULL);
 	targetOptions->payload_prefix = packet_get_tlv_group_entry_value_raw_copy(packet, optionsTlv, TLV_TYPE_C2_PREFIX, (DWORD*)&targetOptions->payload_prefix_size);
 	targetOptions->payload_prefix_skip = packet_get_tlv_group_entry_value_uint(packet, optionsTlv, TLV_TYPE_C2_PREFIX_SKIP);
 	targetOptions->payload_suffix = packet_get_tlv_group_entry_value_raw_copy(packet, optionsTlv, TLV_TYPE_C2_SUFFIX, (DWORD*)&targetOptions->payload_suffix_size);
 	targetOptions->payload_suffix_skip = packet_get_tlv_group_entry_value_uint(packet, optionsTlv, TLV_TYPE_C2_SUFFIX_SKIP);
 	targetOptions->ua = packet_get_tlv_group_entry_value_wstring(packet, optionsTlv, TLV_TYPE_C2_UA, NULL);
-	targetOptions->uri = packet_get_tlv_group_entry_value_wstring(packet, optionsTlv, TLV_TYPE_C2_URI, NULL);
+	// A profile's `set uri` may list several candidate URIs, emitted as
+	// repeated TLV_TYPE_C2_URI values. Collect them all; generate_uri picks
+	// one at random per request (Cobalt Strike semantics).
+	Tlv uriEntry;
+	DWORD uriIndex = 0;
+	while (packet_get_tlv_group_entry_n(packet, optionsTlv, uriIndex, TLV_TYPE_C2_URI, &uriEntry) == ERROR_SUCCESS)
+	{
+		PCHAR narrow = (PCHAR)uriEntry.buffer;
+		size_t wlen = mbstowcs(NULL, narrow, 0) + 1;
+		PWSTR wide = (PWSTR)calloc(wlen, sizeof(wchar_t));
+		if (wide == NULL)
+		{
+			break;
+		}
+		mbstowcs(wide, narrow, wlen);
+
+		PWSTR* grown = (PWSTR*)realloc(targetOptions->uris, sizeof(PWSTR) * (targetOptions->uri_count + 1));
+		if (grown == NULL)
+		{
+			free(wide);
+			break;
+		}
+		targetOptions->uris = grown;
+		targetOptions->uris[targetOptions->uri_count] = wide;
+		targetOptions->uri_count++;
+		uriIndex++;
+	}
 	targetOptions->uuid_cookie = packet_get_tlv_group_entry_value_wstring(packet, optionsTlv, TLV_TYPE_C2_UUID_COOKIE, NULL);
 	targetOptions->uuid_get = packet_get_tlv_group_entry_value_wstring(packet, optionsTlv, TLV_TYPE_C2_UUID_GET, NULL);
 	targetOptions->uuid_header = packet_get_tlv_group_entry_value_wstring(packet, optionsTlv, TLV_TYPE_C2_UUID_HEADER, NULL);
@@ -1047,7 +1094,11 @@ BOOL get_http_options_from_config(Packet* packet, Tlv* c2Tlv, UINT tlvType, Http
 
 static void debug_print_http_options(PSTR type, HttpRequestOptions* options)
 {
-	dprintf("[HTTP OPTION] - %s - Encode Flags: 0x%x", type, options->encode_flags);
+	dprintf("[HTTP OPTION] - %s - Encode Flags Inbound: 0x%x", type, options->encode_flags_inbound);
+	dprintf("[HTTP OPTION] - %s - Encode Flags Outbound: 0x%x", type, options->encode_flags_outbound);
+	dprintf("[HTTP OPTION] - %s - Encode Flags UUID: 0x%x", type, options->encode_flags_uuid);
+	dprintf("[HTTP OPTION] - %s - UUID Prefix: %S", type, options->uuid_prefix);
+	dprintf("[HTTP OPTION] - %s - UUID Suffix: %S", type, options->uuid_suffix);
 	dprintf("[HTTP OPTION] - %s - Headers: %S", type, options->headers);
 	dprintf("[HTTP OPTION] - %s - Payload Prefix Size: %u", type, options->payload_prefix_size);
 	dprintf("[HTTP OPTION] - %s - Payload Prefix: %s", type, options->payload_prefix);
@@ -1055,7 +1106,11 @@ static void debug_print_http_options(PSTR type, HttpRequestOptions* options)
 	dprintf("[HTTP OPTION] - %s - Payload Suffix: %s", type, options->payload_suffix);
 	dprintf("[HTTP OPTION] - %s - Prefix Skip: %u", type, options->payload_prefix_skip);
 	dprintf("[HTTP OPTION] - %s - Suffix Skip: %u", type, options->payload_suffix_skip);
-	dprintf("[HTTP OPTION] - %s - URI: %S", type, options->uri);
+	dprintf("[HTTP OPTION] - %s - URI count: %u", type, options->uri_count);
+	for (UINT i = 0; i < options->uri_count; ++i)
+	{
+		dprintf("[HTTP OPTION] - %s - URI[%u]: %S", type, i, options->uris[i]);
+	}
 	dprintf("[HTTP OPTION] - %s - UUID Cookie: %S", type, options->uuid_cookie);
 	dprintf("[HTTP OPTION] - %s - UUID Get: %S", type, options->uuid_get);
 	dprintf("[HTTP OPTION] - %s - UUID Header: %S", type, options->uuid_header);
