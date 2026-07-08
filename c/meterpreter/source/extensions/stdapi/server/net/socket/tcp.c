@@ -108,7 +108,7 @@ DWORD tcp_channel_client_close(Channel *channel, Packet *request, LPVOID context
 {
 	TcpClientContext *ctx = (TcpClientContext *)context;
 
-	dprintf( "[TCP] tcp_channel_client_close. channel=0x%08X, ctx=0x%08X", channel, ctx );
+	dprintf("[TCP] tcp_channel_client_close. channel=0x%08X id=%u ctx=0x%08X", channel, met_api->channel.get_id(channel), ctx);
 
 	if (ctx)
 	{
@@ -185,10 +185,18 @@ DWORD tcp_channel_client_local_notify(Remote * remote, TcpClientContext * ctx)
 
 		if (dwBytesRead == 0)
 		{
-			dprintf("[TCP] tcp_channel_client_local_notify. [closed] channel=0x%08X read=0x%.8x", ctx->channel, dwBytesRead);
+			dprintf("[TCP] tcp_channel_client_local_notify. [closed] channel=0x%08X id=%u fd=%u read=0x%.8x", ctx->channel, ctx->channel ? met_api->channel.get_id(ctx->channel) : 0, (DWORD)ctx->fd, dwBytesRead);
 
-			// Set the native channel operations context to NULL
+			// Set the native channel operations context to NULL so the channel
+			// close handler won't try to free the context again.
 			met_api->channel.set_native_io_context(ctx->channel, NULL);
+
+			// NULL out the channel pointer before sleeping/freeing to prevent a
+			// race where the framework sends core_channel_close concurrently,
+			// channel_destroy fires with ctx=NULL (skipping the ctx->channel=NULL
+			// assignment in tcp_channel_client_close), and free_socket_context
+			// subsequently calls channel_close on a dangling/recycled pointer.
+			ctx->channel = NULL;
 
 			// Sleep for a quarter second
 			Sleep(250);
@@ -427,6 +435,7 @@ VOID free_socket_context(SocketContext *ctx)
 
 	if (ctx->channel)
 	{
+		dprintf("[TCP] free_socket_context. closing channel=0x%08X id=%u fd=%u", ctx->channel, met_api->channel.get_id(ctx->channel), (DWORD)ctx->fd);
 		met_api->channel.close(ctx->channel, ctx->remote, NULL, 0, NULL);
 		ctx->channel = NULL;
 	}
