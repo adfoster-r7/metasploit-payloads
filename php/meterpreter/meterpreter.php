@@ -416,7 +416,16 @@ if (!function_exists('core_channel_read')) {
     $len_tlv = packet_get_tlv($req, TLV_TYPE_LENGTH);
     $id = $chan_tlv['value'];
     $len = $len_tlv['value'];
+    # DEBUG(2026-07): trace channel_read timing so we can correlate with the
+    # framework's [CHAN] entries.
+    $dbg_t0 = microtime(true);
     $data = channel_read($id, $len);
+    my_print(sprintf("DBG core_channel_read cid=%s len_req=%d data=%s elapsed=%.3fs",
+      $id,
+      $len,
+      $data === false ? 'false' : sprintf('%d bytes', strlen($data)),
+      microtime(true) - $dbg_t0
+    ));
     if ($data === false) {
       $res = ERROR_FAILURE;
     } else {
@@ -439,7 +448,16 @@ if (!function_exists('core_channel_write')) {
     $data = $data_tlv['value'];
     $len = $len_tlv['value'];
 
+    # DEBUG(2026-07): trace channel_write timing to correlate with framework
+    # [CHAN] entries.
+    $dbg_t0 = microtime(true);
     $wrote = channel_write($id, $data, $len);
+    my_print(sprintf("DBG core_channel_write cid=%s len_req=%d wrote=%s elapsed=%.3fs",
+      $id,
+      $len,
+      $wrote === false ? 'false' : (string)$wrote,
+      microtime(true) - $dbg_t0
+    ));
     if ($wrote === false) {
       return ERROR_FAILURE;
     } else {
