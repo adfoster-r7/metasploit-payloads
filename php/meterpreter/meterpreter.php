@@ -1732,7 +1732,18 @@ function dispatch_http(&$transport) {
       return DISPATCH_RETIRE;
     }
 
+    # DEBUG(2026-07): trace each HTTP poll, its response size, and the delay
+    # since the previous receive so we can see when PHP is backing off between
+    # channel operations. Remove once channel-read hang on Windows/PHP5.3 is
+    # understood.
+    $poll_ts = microtime(true);
     $raw = http_get_packet($transport);
+    my_print(sprintf("DBG http_get_packet: len=%s empty_count=%d elapsed=%.3fs since_last_pkt=%ds",
+      is_string($raw) ? strlen($raw) : 'null',
+      $empty_count,
+      microtime(true) - $poll_ts,
+      time() - $last_packet_time
+    ));
 
     if ($raw != null && strlen($raw) >= 32) {
       $empty_count = 0;
@@ -1740,12 +1751,22 @@ function dispatch_http(&$transport) {
 
       $xor = substr($raw, 0, 4);
       $decrypted = decrypt_packet(xor_bytes($xor, $raw));
+      # DEBUG(2026-07): log inbound command id before dispatch.
+      $cmd_id_tlv = packet_get_tlv($decrypted, TLV_TYPE_COMMAND_ID);
+      $chan_tlv = packet_get_tlv($decrypted, TLV_TYPE_CHANNEL_ID);
+      my_print(sprintf("DBG dispatch inbound command_id=%s channel_id=%s decrypted_len=%d",
+        isset($cmd_id_tlv['value']) ? $cmd_id_tlv['value'] : 'none',
+        isset($chan_tlv['value']) ? $chan_tlv['value'] : 'none',
+        strlen($decrypted)
+      ));
       $response = create_response($decrypted);
+      my_print(sprintf("DBG response ready len=%d", strlen($response)));
 
       $xor_key = rand_xor_key();
       $encrypted = encrypt_packet($response);
       $packet = $xor_key . xor_bytes($xor_key, $encrypted);
       http_send_packet($transport, $packet);
+      my_print(sprintf("DBG http_send_packet posted len=%d", strlen($packet)));
     } else {
       if ($raw !== null) {
         # empty 200: connection is alive
